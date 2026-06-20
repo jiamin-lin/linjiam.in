@@ -3,7 +3,7 @@ const idFlutteringRibbon = 'canvasFlutteringRibbon'
 
 function destroyFlutteringRibbon() {
   const ribbon = document.getElementById(idFlutteringRibbon)
-  if (ribbon && ribbon.parentNode) {
+  if (ribbon && ribbon.parentNode && ribbon.parentNode.contains(ribbon)) {
     ribbon.parentNode.removeChild(ribbon)
   }
 }
@@ -126,7 +126,7 @@ function createFlutteringRibbon() {
           init: function () {
             try {
               ;(this._canvas = document.createElement('canvas')),
-                (this._canvas.id = id),
+                (this._canvas.id = 'flutteringRibbon'),
                 (this._canvas.style.display = 'block'),
                 (this._canvas.style.position = 'fixed'),
                 (this._canvas.style.margin = '0'),

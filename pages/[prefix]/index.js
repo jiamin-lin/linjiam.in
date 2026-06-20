@@ -1,17 +1,25 @@
 import BLOG from '@/blog.config'
 import useNotification from '@/components/Notification'
+import TechGrow from '@/components/TechGrow'
 import { siteConfig } from '@/lib/config'
-import { getGlobalData, getPost, getPostBlocks } from '@/lib/db/getSiteData'
+import { resolvePostProps } from '@/lib/db/SiteDataApi'
 import { useGlobal } from '@/lib/global'
-import { getPageTableOfContents } from '@/lib/notion/getPageTableOfContents'
-import { getPasswordQuery } from '@/lib/password'
-import { uploadDataToAlgolia } from '@/lib/plugins/algolia'
-import { checkSlugHasNoSlash, getRecommendPost } from '@/lib/utils/post'
-import { getLayoutByTheme } from '@/themes/theme'
+import { getPageTableOfContents } from '@/lib/db/notion/getPageTableOfContents'
+import {
+  getPasswordQuery,
+  getPasswordStoragePath,
+  sha256Digest
+} from '@/lib/utils/password'
+import { checkSlugHasNoSlash } from '@/lib/utils/post'
+import { DynamicLayout } from '@/themes/theme'
 import md5 from 'js-md5'
 import { useRouter } from 'next/router'
-import { idToUuid } from 'notion-utils'
+import PropTypes from 'prop-types'
 import { useEffect, useState } from 'react'
+import { getStaticPathsBase } from '@/lib/build/staticPaths'
+import { isExport } from '@/lib/utils/buildMode'
+
+const isStaticExport = process.env.EXPORT === 'true'
 
 /**
  * 根据notion的slug访问页面
@@ -30,17 +38,21 @@ const Slug = props => {
 
   /**
    * 验证文章密码
-   * @param {*} result
+   * @param {*} passInput
    */
   const validPassword = passInput => {
     if (!post) {
       return false
     }
-    const encrypt = md5(post?.slug + passInput)
-    if (passInput && encrypt === post?.password) {
+    const legacy = md5(String(post?.slug ?? '') + passInput)
+    const nextHash = sha256Digest(passInput)
+    if (nextHash === post?.password || legacy === post?.password) {
       setLock(false)
-      // 输入密码存入localStorage，下次自动提交
-      localStorage.setItem('password_' + router.asPath, passInput)
+      // 输入密码存入 localStorage；键仅含 pathname，避免 query/hash 导致读写不一致（PR #3389）
+      localStorage.setItem(
+        'password_' + getPasswordStoragePath(router.asPath),
+        passInput
+      )
       showNotification(locale.COMMON.ARTICLE_UNLOCK_TIPS) // 设置解锁成功提示显示
       return true
     }
@@ -54,12 +66,6 @@ const Slug = props => {
       setLock(true)
     } else {
       setLock(false)
-      if (!lock && post?.blockMap?.block) {
-        post.content = Object.keys(post.blockMap.block).filter(
-          key => post.blockMap.block[key]?.value?.parent_id === post.id
-        )
-        post.toc = getPageTableOfContents(post, post.blockMap)
-      }
     }
 
     // 读取上次记录 自动提交密码
@@ -71,7 +77,9 @@ const Slug = props => {
         }
       }
     }
-  }, [post])
+    // validPassword 内部依赖 post / router 同时也已在依赖里
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [post, router.asPath])
 
   // 文章加载
   useEffect(() => {
@@ -85,117 +93,60 @@ const Slug = props => {
       )
       post.toc = getPageTableOfContents(post, post.blockMap)
     }
-  }, [router, lock])
+  }, [router, lock, post])
 
-  props = { ...props, lock, setLock, validPassword }
-  // 根据页面路径加载不同Layout文件
-  const Layout = getLayoutByTheme({
-    theme: siteConfig('THEME'),
-    router: useRouter()
-  })
+  props = { ...props, lock, validPassword }
+  const theme = siteConfig('THEME', BLOG.THEME, props.NOTION_CONFIG)
   return (
     <>
-      <Layout {...props} />
+      {/* 文章布局 */}
+      <DynamicLayout theme={theme} layoutName='LayoutSlug' {...props} />
+      {/* 解锁密码提示框 */}
       {post?.password && post?.password !== '' && !lock && <Notification />}
+      {/* 导流工具 */}
+      <TechGrow lock={lock} />
     </>
   )
 }
 
-export async function getStaticPaths() {
-  if (!BLOG.isProd) {
-    return {
-      paths: [],
-      fallback: true
-    }
-  }
+Slug.propTypes = {
+  post: PropTypes.shape({
+    id: PropTypes.string,
+    slug: PropTypes.string,
+    password: PropTypes.string,
+    content: PropTypes.array,
+    toc: PropTypes.array,
+    blockMap: PropTypes.shape({
+      block: PropTypes.object
+    })
+  }),
+  NOTION_CONFIG: PropTypes.object
+}
 
-  const from = 'slug-paths'
-  const { allPages } = await getGlobalData({ from })
-  const paths = allPages
-    ?.filter(row => checkSlugHasNoSlash(row))
-    .map(row => ({ params: { prefix: row.slug } }))
-  return {
-    paths: paths,
-    fallback: true
-  }
+export async function getStaticPaths() {
+  return getStaticPathsBase({
+    from: 'slug-paths',
+    filterFn: row => checkSlugHasNoSlash(row),
+    mapPageToParams: row => ({ params: { prefix: row.slug } })
+  })
 }
 
 export async function getStaticProps({ params: { prefix }, locale }) {
-  let fullSlug = prefix
-  const from = `slug-props-${fullSlug}`
-  const props = await getGlobalData({ from, locale })
-  if (siteConfig('PSEUDO_STATIC', false, props.NOTION_CONFIG)) {
-    if (!fullSlug.endsWith('.html')) {
-      fullSlug += '.html'
-    }
-  }
-
-  // 在列表内查找文章
-  props.post = props?.allPages?.find(p => {
-    return (
-      p.type.indexOf('Menu') < 0 &&
-      (p.slug === prefix || p.id === idToUuid(prefix))
-    )
+  const props = await resolvePostProps({
+    prefix,
+    locale,
   })
 
-  // 处理非列表内文章的内信息
-  if (!props?.post) {
-    const pageId = prefix
-    if (pageId.length >= 32) {
-      const post = await getPost(pageId)
-      props.post = post
-    }
-  }
-  // 无法获取文章
-  if (!props?.post) {
-    props.post = null
-    return {
-      props,
-      revalidate: siteConfig(
-        'REVALIDATE_SECOND',
-        BLOG.NEXT_REVALIDATE_SECOND,
-        props.NOTION_CONFIG
-      )
-    }
-  }
-
-  // 文章内容加载
-  if (!props?.post?.blockMap) {
-    props.post.blockMap = await getPostBlocks(props.post.id, from)
-  }
-
-  // 生成全文索引 && process.env.npm_lifecycle_event === 'build' && JSON.parse(BLOG.ALGOLIA_RECREATE_DATA)
-  if (BLOG.ALGOLIA_APP_ID) {
-    uploadDataToAlgolia(props?.post)
-  }
-
-  // 推荐关联文章处理
-  const allPosts = props.allPages?.filter(
-    page => page.type === 'Post' && page.status === 'Published'
-  )
-  if (allPosts && allPosts.length > 0) {
-    const index = allPosts.indexOf(props.post)
-    props.prev = allPosts.slice(index - 1, index)[0] ?? allPosts.slice(-1)[0]
-    props.next = allPosts.slice(index + 1, index + 2)[0] ?? allPosts[0]
-    props.recommendPosts = getRecommendPost(
-      props.post,
-      allPosts,
-      siteConfig('POST_RECOMMEND_COUNT')
-    )
-  } else {
-    props.prev = null
-    props.next = null
-    props.recommendPosts = []
-  }
-
-  delete props.allPages
   return {
     props,
-    revalidate: siteConfig(
-      'NEXT_REVALIDATE_SECOND',
-      BLOG.NEXT_REVALIDATE_SECOND,
-      props.NOTION_CONFIG
-    )
+    revalidate: isStaticExport
+      ? undefined
+      : siteConfig(
+        'NEXT_REVALIDATE_SECOND',
+        BLOG.NEXT_REVALIDATE_SECOND,
+        props.NOTION_CONFIG
+      ),
+    notFound: !props.post
   }
 }
 

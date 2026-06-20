@@ -1,8 +1,7 @@
 import BLOG from '@/blog.config'
 import { siteConfig } from '@/lib/config'
-import { getGlobalData } from '@/lib/db/getSiteData'
-import { getLayoutByTheme } from '@/themes/theme'
-import { useRouter } from 'next/router'
+import { fetchGlobalAllData } from '@/lib/db/SiteDataApi'
+import { DynamicLayout } from '@/themes/theme'
 
 /**
  * 分类页
@@ -11,18 +10,13 @@ import { useRouter } from 'next/router'
  */
 
 export default function Category(props) {
-  // 根据页面路径加载不同Layout文件
-  const Layout = getLayoutByTheme({
-    theme: siteConfig('THEME'),
-    router: useRouter()
-  })
-
-  return <Layout {...props} />
+  const theme = siteConfig('THEME', BLOG.THEME, props.NOTION_CONFIG)
+  return <DynamicLayout theme={theme} layoutName='LayoutPostList' {...props} />
 }
 
 export async function getStaticProps({ params: { category, page } }) {
   const from = 'category-page-props'
-  let props = await getGlobalData({ from })
+  let props = await fetchGlobalAllData({ from })
 
   // 过滤状态类型
   props.posts = props.allPages
@@ -44,17 +38,19 @@ export async function getStaticProps({ params: { category, page } }) {
 
   return {
     props,
-    revalidate: siteConfig(
-      'NEXT_REVALIDATE_SECOND',
-      BLOG.NEXT_REVALIDATE_SECOND,
-      props.NOTION_CONFIG
-    )
+    revalidate: process.env.EXPORT
+      ? undefined
+      : siteConfig(
+          'NEXT_REVALIDATE_SECOND',
+          BLOG.NEXT_REVALIDATE_SECOND,
+          props.NOTION_CONFIG
+        )
   }
 }
 
 export async function getStaticPaths() {
   const from = 'category-paths'
-  const { categoryOptions, allPages, NOTION_CONFIG } = await getGlobalData({
+  const { categoryOptions, allPages, NOTION_CONFIG } = await fetchGlobalAllData({
     from
   })
   const paths = []
@@ -69,7 +65,7 @@ export async function getStaticPaths() {
     // 处理文章页数
     const postCount = categoryPosts.length
     const totalPages = Math.ceil(
-      postCount / siteConfig('POSTS_PER_PAGE', 12, NOTION_CONFIG)
+      postCount / siteConfig('POSTS_PER_PAGE', null, NOTION_CONFIG)
     )
     if (totalPages > 1) {
       for (let i = 1; i <= totalPages; i++) {

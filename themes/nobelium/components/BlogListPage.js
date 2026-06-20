@@ -1,6 +1,6 @@
 import { siteConfig } from '@/lib/config'
 import { useGlobal } from '@/lib/global'
-import Link from 'next/link'
+import SmartLink from '@/components/SmartLink'
 import { useRouter } from 'next/router'
 import BlogPost from './BlogPost'
 
@@ -9,7 +9,7 @@ export const BlogListPage = props => {
   const { locale } = useGlobal()
   const router = useRouter()
   const { NOTION_CONFIG } = useGlobal()
-  const POSTS_PER_PAGE = siteConfig('POSTS_PER_PAGE', 12, NOTION_CONFIG)
+  const POSTS_PER_PAGE = siteConfig('POSTS_PER_PAGE', null, NOTION_CONFIG)
   const totalPage = Math.ceil(postCount / POSTS_PER_PAGE)
   const currentPage = +page
 
@@ -19,6 +19,7 @@ export const BlogListPage = props => {
     .split('?')[0]
     .replace(/\/page\/[1-9]\d*/, '')
     .replace(/\/$/, '')
+    .replace('.html', '')
 
   return (
     <div className='w-full md:pr-12 my-6'>
@@ -29,7 +30,7 @@ export const BlogListPage = props => {
       </div>
 
       <div className='flex justify-between text-xs'>
-        <Link
+        <SmartLink
           href={{
             pathname:
               currentPage - 1 === 1
@@ -41,8 +42,8 @@ export const BlogListPage = props => {
           <button rel='prev' className='block cursor-pointer'>
             ← {locale.PAGINATION.PREV}
           </button>
-        </Link>
-        <Link
+        </SmartLink>
+        <SmartLink
           href={{
             pathname: `${pagePrefix}/page/${currentPage + 1}`,
             query: router.query.s ? { s: router.query.s } : {}
@@ -51,7 +52,7 @@ export const BlogListPage = props => {
           <button rel='next' className='block cursor-pointer'>
             {locale.PAGINATION.NEXT} →
           </button>
-        </Link>
+        </SmartLink>
       </div>
     </div>
   )

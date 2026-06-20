@@ -1,6 +1,7 @@
 import { siteConfig } from '@/lib/config'
-import { compressImage, mapImgUrl } from '@/lib/notion/mapImage'
-import { isBrowser } from '@/lib/utils'
+import { compressImage, mapImgUrl } from '@/lib/db/notion/mapImage'
+import NotionLink from '@/components/NotionLink'
+import { isBrowser, loadExternalResource } from '@/lib/utils'
 import mediumZoom from '@fisch0920/medium-zoom'
 import 'katex/dist/katex.min.css'
 import dynamic from 'next/dynamic'
@@ -17,27 +18,26 @@ const NotionPage = ({ post, className }) => {
   // 是否关闭数据库和画册的点击跳转
   const POST_DISABLE_GALLERY_CLICK = siteConfig('POST_DISABLE_GALLERY_CLICK')
   const POST_DISABLE_DATABASE_CLICK = siteConfig('POST_DISABLE_DATABASE_CLICK')
+  const SPOILER_TEXT_TAG = siteConfig('SPOILER_TEXT_TAG')
 
-  const zoom =
-    isBrowser &&
-    mediumZoom({
-      //   container: '.notion-viewport',
-      background: 'rgba(0, 0, 0, 0.2)',
-      margin: getMediumZoomMargin()
-    })
-
-  const zoomRef = useRef(zoom ? zoom.clone() : null)
-
+  const zoomRef = useRef(null)
+  const IMAGE_ZOOM_IN_WIDTH = siteConfig('IMAGE_ZOOM_IN_WIDTH', 1200)
   // 页面首次打开时执行的勾子
   useEffect(() => {
     // 检测当前的url并自动滚动到对应目标
-    autoScrollToTarget()
+    autoScrollToHash()
   }, [])
 
   // 页面文章发生变化时会执行的勾子
   useEffect(() => {
     // 相册视图点击禁止跳转，只能放大查看图片
     if (POST_DISABLE_GALLERY_CLICK) {
+      if (!zoomRef.current && isBrowser) {
+        zoomRef.current = mediumZoom({
+          background: 'rgba(0, 0, 0, 0.2)',
+          margin: getMediumZoomMargin()
+        })
+      }
       // 针对页面中的gallery视图，点击后是放大图片还是跳转到gallery的内部页面
       processGalleryImg(zoomRef?.current)
     }
@@ -50,6 +50,13 @@ const NotionPage = ({ post, className }) => {
     /**
      * 放大查看图片时替换成高清图像
      */
+    const articleRoot =
+      document.getElementById('notion-article') || document.body
+    const hasAnyImage = Boolean(articleRoot.querySelector('img'))
+    if (!hasAnyImage) {
+      return
+    }
+
     const observer = new MutationObserver((mutationsList, observer) => {
       mutationsList.forEach(mutation => {
         if (
@@ -64,7 +71,7 @@ const NotionPage = ({ post, className }) => {
               //   替换为更高清的图像
               mutation?.target?.setAttribute(
                 'src',
-                compressImage(src, siteConfig('IMAGE_ZOOM_IN_WIDTH', 1200))
+                compressImage(src, IMAGE_ZOOM_IN_WIDTH)
               )
             }, 800)
           }
@@ -72,8 +79,8 @@ const NotionPage = ({ post, className }) => {
       })
     })
 
-    // 监视页面元素和属性变化
-    observer.observe(document.body, {
+    // 监视正文容器，避免对整个 document.body 做高开销监听
+    observer.observe(articleRoot, {
       attributes: true,
       subtree: true,
       attributeFilter: ['class']
@@ -83,6 +90,24 @@ const NotionPage = ({ post, className }) => {
       observer.disconnect()
     }
   }, [post])
+
+  useEffect(() => {
+    // Spoiler文本功能
+    if (SPOILER_TEXT_TAG) {
+      import('lodash/escapeRegExp').then(escapeRegExp => {
+        Promise.all([
+          loadExternalResource('/js/spoilerText.js', 'js'),
+          loadExternalResource('/css/spoiler-text.css', 'css')
+        ]).then(() => {
+          window.textToSpoiler &&
+            window.textToSpoiler(escapeRegExp.default(SPOILER_TEXT_TAG))
+        })
+      })
+    }
+  }, [post])
+
+  // const cleanBlockMap = cleanBlocksWithWarn(post?.blockMap);
+  // console.log('NotionPage render with post:', post);
 
   return (
     <div
@@ -96,17 +121,28 @@ const NotionPage = ({ post, className }) => {
           Code,
           Collection,
           Equation,
+          Link: NotionLink,
           Modal,
           Pdf,
+          Quote: NotionQuote,
           Tweet
         }}
       />
 
       <AdEmbed />
-      <PrismMac />
+      {hasCodeBlock(post?.blockMap) && <PrismMac />}
     </div>
   )
 }
+
+const hasCodeBlock = blockMap => {
+  const blocks = blockMap?.block
+  if (!blocks) return false
+  return Object.values(blocks).some(
+    item => item?.value?.type === 'code'
+  )
+}
+
 
 /**
  * 页面的数据库链接禁止跳转，只能查看
@@ -144,14 +180,16 @@ const processGalleryImg = zoom => {
 }
 
 /**
- * 根据url参数自动滚动到指定区域
+ * 根据url参数自动滚动到锚位置
  */
-const autoScrollToTarget = () => {
+const autoScrollToHash = () => {
   setTimeout(() => {
     // 跳转到指定标题
-    const needToJumpToTitle = window.location.hash
+    const hash = window?.location?.hash
+    const needToJumpToTitle = hash && hash.length > 0
     if (needToJumpToTitle) {
-      const tocNode = document.getElementById(window.location.hash.substring(1))
+      console.log('jump to hash', hash)
+      const tocNode = document.getElementById(hash.substring(1))
       if (tocNode && tocNode?.className?.indexOf('notion') > -1) {
         tocNode.scrollIntoView({ block: 'start', behavior: 'smooth' })
       }
@@ -194,7 +232,7 @@ function getMediumZoomMargin() {
 // 代码
 const Code = dynamic(
   () =>
-    import('react-notion-x/build/third-party/code').then(async m => {
+    import('react-notion-x/build/third-party/code').then(m => {
       return m.Code
     }),
   { ssr: false }
@@ -208,7 +246,7 @@ const Equation = dynamic(
       await import('@/lib/plugins/mhchem')
       return m.Equation
     }),
-  { ssr: false }
+  { ssr: true }
 )
 
 // 原版文档
@@ -259,6 +297,40 @@ const Modal = dynamic(
 
 const Tweet = ({ id }) => {
   return <TweetEmbed tweetId={id} />
+}
+
+// Custom Quote override: react-notion-x drops quotes without properties.title
+// (returns null from early guard). This renders them correctly — fixes #4140.
+const NotionQuote = ({ block, children }) => {
+  const title = block?.properties?.title
+  return (
+    <blockquote className='notion-quote'>
+      {title && <NotionText value={title} />}
+      {children}
+    </blockquote>
+  )
+}
+
+// Minimal inline text renderer for Notion rich-text arrays.
+// Each segment is [plainText, [[formatType, optionalValue], ...]].
+const NotionText = ({ value }) => {
+  if (!Array.isArray(value)) return null
+  return value.map((segment, i) => {
+    if (!Array.isArray(segment) || !segment[0]) return null
+    const [text, formats] = segment
+    let element = <>{text}</>
+    if (Array.isArray(formats)) {
+      for (const fmt of formats) {
+        const type = Array.isArray(fmt) ? fmt[0] : fmt
+        if (type === 'b') element = <strong>{element}</strong>
+        else if (type === 'i') element = <em>{element}</em>
+        else if (type === 's') element = <s>{element}</s>
+        else if (type === 'c') element = <code>{element}</code>
+        else if (type === 'a') element = <a href={Array.isArray(fmt) ? fmt[1] : '#'}>{element}</a>
+      }
+    }
+    return <span key={i}>{element}</span>
+  })
 }
 
 export default NotionPage

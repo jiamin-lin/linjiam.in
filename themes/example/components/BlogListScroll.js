@@ -13,7 +13,7 @@ export const BlogListScroll = props => {
   const { posts } = props
   const { locale, NOTION_CONFIG } = useGlobal()
   const [page, updatePage] = useState(1)
-  const POSTS_PER_PAGE = siteConfig('POSTS_PER_PAGE', 12, NOTION_CONFIG)
+  const POSTS_PER_PAGE = siteConfig('POSTS_PER_PAGE', null, NOTION_CONFIG)
 
   let hasMore = false
   const postsToShow = posts
@@ -48,7 +48,7 @@ export const BlogListScroll = props => {
   const showPageCover = siteConfig('EXAMPLE_POST_LIST_COVER', null, CONFIG)
 
   useEffect(() => {
-    window.addEventListener('scroll', scrollTrigger)
+    window.addEventListener('scroll', scrollTrigger, { passive: true })
 
     return () => {
       window.removeEventListener('scroll', scrollTrigger)

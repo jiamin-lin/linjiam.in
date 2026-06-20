@@ -1,6 +1,6 @@
 import { siteConfig } from '@/lib/config'
 import { useGlobal } from '@/lib/global'
-import Link from 'next/link'
+import SmartLink from '@/components/SmartLink'
 import { useRouter } from 'next/router'
 import CONFIG from '../config'
 import BlogItem from './BlogItem'
@@ -14,7 +14,7 @@ export const BlogListPage = props => {
   const { locale, NOTION_CONFIG } = useGlobal()
   const router = useRouter()
   const totalPage = Math.ceil(
-    postCount / siteConfig('POSTS_PER_PAGE', 12, NOTION_CONFIG)
+    postCount / siteConfig('POSTS_PER_PAGE', null, NOTION_CONFIG)
   )
   const currentPage = +page
 
@@ -24,6 +24,7 @@ export const BlogListPage = props => {
     .split('?')[0]
     .replace(/\/page\/[1-9]\d*/, '')
     .replace(/\/$/, '')
+    .replace('.html', '')
 
   const showPageCover = siteConfig('EXAMPLE_POST_LIST_COVER', null, CONFIG)
 
@@ -36,7 +37,7 @@ export const BlogListPage = props => {
       </div>
 
       <div className='flex justify-between text-xs'>
-        <Link
+        <SmartLink
           href={{
             pathname:
               currentPage - 1 === 1
@@ -44,17 +45,17 @@ export const BlogListPage = props => {
                 : `${pagePrefix}/page/${currentPage - 1}`,
             query: router.query.s ? { s: router.query.s } : {}
           }}
-          className={`${showPrev ? 'bg-black ' : 'bg-gray pointer-events-none '} text-white no-underline py-2 px-3 rounded`}>
+          className={`${showPrev ? 'bg-black dark:bg-hexo-black-gray' : 'bg-gray pointer-events-none invisible'} text-white no-underline py-2 px-3 rounded`}>
           {locale.PAGINATION.PREV}
-        </Link>
-        <Link
+        </SmartLink>
+        <SmartLink
           href={{
             pathname: `${pagePrefix}/page/${currentPage + 1}`,
             query: router.query.s ? { s: router.query.s } : {}
           }}
-          className={`${showNext ? 'bg-black ' : 'bg-gray pointer-events-none '} text-white no-underline py-2 px-3 rounded`}>
+          className={`${showNext ? 'bg-black dark:bg-hexo-black-gray ' : 'bg-gray pointer-events-none invisible'} text-white no-underline py-2 px-3 rounded`}>
           {locale.PAGINATION.NEXT}
-        </Link>
+        </SmartLink>
       </div>
     </div>
   )
